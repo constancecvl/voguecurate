@@ -5,8 +5,16 @@ export interface CollectionImage {
   base64?: string;
 }
 
+export interface PromotionalAssets {
+  tagline: string;
+  instagramCaption: string;
+  pressSnippet: string;
+  posterUrl?: string;
+}
+
 export interface ExhibitionStrategy {
   themeName: string;
+  tagline: string;
   conceptDescription: string;
   lightingStrategy: string;
   musicAtmosphere: string;
@@ -21,6 +29,7 @@ export interface Collection {
   description: string;
   images: CollectionImage[];
   strategy?: ExhibitionStrategy;
+  promoAssets?: PromotionalAssets;
   visualConceptUrl?: string;
   createdAt: number;
 }

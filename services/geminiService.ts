@@ -1,17 +1,12 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ExhibitionStrategy } from "../types";
+import { ExhibitionStrategy, PromotionalAssets } from "../types";
 
-/**
- * Generates a detailed exhibition strategy for a fashion collection.
- * Uses gemini-3-pro-preview for complex reasoning and curation tasks.
- */
 export const generateExhibitionStrategy = async (
   collectionName: string,
   description: string,
-  images: string[] // base64 strings
+  images: string[]
 ): Promise<ExhibitionStrategy> => {
-  // Always use this pattern for Gemini initialization as per guidelines
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const imageParts = images.map(img => ({
@@ -26,8 +21,8 @@ export const generateExhibitionStrategy = async (
     contents: {
       parts: [
         ...imageParts,
-        { text: `Acting as a world-class fashion exhibition curator (like Andrew Bolton), analyze this fashion collection: "${collectionName}". Description: ${description}. 
-        Create a detailed exhibition strategy including a theme name, concept, lighting, music/soundscape, spatial arrangement, and suggested materials for the installation.` }
+        { text: `Acting as a world-class fashion exhibition curator, analyze this fashion collection: "${collectionName}". Description: ${description}. 
+        Create an exhibition strategy including a theme name, a short evocative tagline, concept, lighting, music/soundscape, spatial arrangement, and materials.` }
       ]
     },
     config: {
@@ -36,6 +31,7 @@ export const generateExhibitionStrategy = async (
         type: Type.OBJECT,
         properties: {
           themeName: { type: Type.STRING },
+          tagline: { type: Type.STRING },
           conceptDescription: { type: Type.STRING },
           lightingStrategy: { type: Type.STRING },
           musicAtmosphere: { type: Type.STRING },
@@ -45,23 +41,79 @@ export const generateExhibitionStrategy = async (
             items: { type: Type.STRING }
           }
         },
-        required: ["themeName", "conceptDescription", "lightingStrategy", "musicAtmosphere", "spatialArrangement", "materialsUsed"]
+        required: ["themeName", "tagline", "conceptDescription", "lightingStrategy", "musicAtmosphere", "spatialArrangement", "materialsUsed"]
       }
     }
   });
 
-  // Access the text property directly (not as a function)
   const text = response.text;
-  if (!text) {
-    throw new Error("Gemini returned an empty response");
-  }
+  if (!text) throw new Error("Gemini returned an empty response");
   return JSON.parse(text.trim());
 };
 
-/**
- * Generates a visual concept sketch for the exhibition.
- * Uses gemini-2.5-flash-image for general image generation tasks.
- */
+export const generatePromotionalSuite = async (
+  collection: { name: string; strategy: ExhibitionStrategy }
+): Promise<PromotionalAssets> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+  const copyResponse = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: `Write promotional copy for a fashion exhibition. 
+    Collection: ${collection.name}. 
+    Theme: ${collection.strategy.themeName}. 
+    Tagline: ${collection.strategy.tagline}.
+    Provide: 1. A punchy Instagram caption with hashtags. 2. A sophisticated 2-sentence press snippet.`,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          instagramCaption: { type: Type.STRING },
+          pressSnippet: { type: Type.STRING }
+        },
+        required: ["instagramCaption", "pressSnippet"]
+      }
+    }
+  });
+
+  const copy = JSON.parse(copyResponse.text || '{}');
+
+  const posterResponse = await ai.models.generateContent({
+    model: 'gemini-2.5-flash-image',
+    contents: {
+      parts: [{ 
+        text: `A high-end cinematic fashion advertisement poster for an exhibition titled "${collection.strategy.themeName}". 
+        Style: Vogue editorial, luxury, minimalist but dramatic. 
+        Atmosphere: Avant-garde installation in the background, sharp fashion silhouette in the foreground. 
+        Lighting: High contrast, dramatic shadows.` 
+      }]
+    },
+    config: {
+      imageConfig: {
+        aspectRatio: "3:4"
+      }
+    }
+  });
+
+  let posterUrl = "";
+  const candidate = posterResponse.candidates?.[0];
+  if (candidate?.content?.parts) {
+    for (const part of candidate.content.parts) {
+      if (part.inlineData) {
+        posterUrl = `data:image/png;base64,${part.inlineData.data}`;
+        break;
+      }
+    }
+  }
+
+  return {
+    tagline: collection.strategy.tagline,
+    instagramCaption: copy.instagramCaption,
+    pressSnippet: copy.pressSnippet,
+    posterUrl
+  };
+};
+
 export const generateVisualConcept = async (
   strategy: ExhibitionStrategy
 ): Promise<string> => {
@@ -84,7 +136,6 @@ export const generateVisualConcept = async (
     }
   });
 
-  // Iterating through parts to find the image data as required for nano banana series models
   const candidate = response.candidates?.[0];
   if (candidate?.content?.parts) {
     for (const part of candidate.content.parts) {
@@ -94,5 +145,5 @@ export const generateVisualConcept = async (
     }
   }
   
-  throw new Error("Failed to generate image: No image data returned by the model");
+  throw new Error("Failed to generate image");
 };
