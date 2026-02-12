@@ -1,0 +1,7 @@
+{
+  "name": "VogueCurate - Fashion Exhibition Designer",
+  "description": "An AI-powered assistant for fashion designers and curators to conceptualize, plan, and visualize exhibitions for their collections. Generate installation themes, lighting schemes, and visual sketches.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
