@@ -2,6 +2,20 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ExhibitionStrategy, PromotionalAssets } from "../types";
 
+/**
+ * Helper to clean and parse JSON from Gemini's response.
+ */
+const parseGeminiJson = (text: string) => {
+  try {
+    // Remove markdown code blocks if present
+    const cleaned = text.replace(/```json\n?|```/g, "").trim();
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.error("Failed to parse Gemini JSON:", text);
+    throw new Error("The curator returned an invalid response format. Please try again.");
+  }
+};
+
 export const generateExhibitionStrategy = async (
   collectionName: string,
   description: string,
@@ -22,7 +36,8 @@ export const generateExhibitionStrategy = async (
       parts: [
         ...imageParts,
         { text: `Acting as a world-class fashion exhibition curator, analyze this fashion collection: "${collectionName}". Description: ${description}. 
-        Create an exhibition strategy including a theme name, a short evocative tagline, concept, lighting, music/soundscape, spatial arrangement, and materials.` }
+        Create a detailed exhibition strategy including a theme name, a short evocative tagline, concept, lighting, music/soundscape, spatial arrangement, and materials.
+        You MUST respond in raw JSON format matching the requested schema.` }
       ]
     },
     config: {
@@ -48,7 +63,7 @@ export const generateExhibitionStrategy = async (
 
   const text = response.text;
   if (!text) throw new Error("Gemini returned an empty response");
-  return JSON.parse(text.trim());
+  return parseGeminiJson(text);
 };
 
 export const generatePromotionalSuite = async (
@@ -62,7 +77,8 @@ export const generatePromotionalSuite = async (
     Collection: ${collection.name}. 
     Theme: ${collection.strategy.themeName}. 
     Tagline: ${collection.strategy.tagline}.
-    Provide: 1. A punchy Instagram caption with hashtags. 2. A sophisticated 2-sentence press snippet.`,
+    Provide: 1. A punchy Instagram caption with hashtags. 2. A sophisticated 2-sentence press snippet.
+    Respond in raw JSON format.`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -76,7 +92,7 @@ export const generatePromotionalSuite = async (
     }
   });
 
-  const copy = JSON.parse(copyResponse.text || '{}');
+  const copy = parseGeminiJson(copyResponse.text || "{}");
 
   const posterResponse = await ai.models.generateContent({
     model: 'gemini-2.5-flash-image',

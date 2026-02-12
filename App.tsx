@@ -14,7 +14,7 @@ const App: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isImgGenerating, setIsImgGenerating] = useState(false);
   const [isPromoGenerating, setIsPromoGenerating] = useState(false);
-  const [storageError, setStorageError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({ name: '', season: '', description: '' });
   const [pendingImages, setPendingImages] = useState<CollectionImage[]>([]);
@@ -29,10 +29,9 @@ const App: React.FC = () => {
   useEffect(() => {
     try {
       localStorage.setItem('voguecurate_collections', JSON.stringify(collections));
-      setStorageError(null);
     } catch (e) {
       if (e instanceof DOMException && e.name === 'QuotaExceededError') {
-        setStorageError("Storage limit reached. Please delete old collections.");
+        setError("Storage limit reached. Please delete old collections.");
       }
     }
   }, [collections]);
@@ -88,43 +87,71 @@ const App: React.FC = () => {
     setView(AppView.EDITOR);
     setFormData({ name: '', season: '', description: '' });
     setPendingImages([]);
+    setError(null);
+  };
+
+  const deleteCollection = (id: string) => {
+    setCollections(prev => prev.filter(c => c.id !== id));
+    if (activeCollection?.id === id) {
+      setActiveCollection(null);
+      setView(AppView.DASHBOARD);
+    }
   };
 
   const handleCuration = async () => {
     if (!activeCollection) return;
     setIsGenerating(true);
+    setError(null);
     try {
       const strategy = await generateExhibitionStrategy(activeCollection.name, activeCollection.description, activeCollection.images.map(img => img.base64 || img.url));
       const updated = { ...activeCollection, strategy };
       setActiveCollection(updated);
       setCollections(prev => prev.map(c => c.id === updated.id ? updated : c));
-    } catch (err) { console.error(err); } finally { setIsGenerating(false); }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Failed to generate design strategy.");
+    } finally { setIsGenerating(false); }
   };
 
   const handleVisualConcept = async () => {
     if (!activeCollection?.strategy) return;
     setIsImgGenerating(true);
+    setError(null);
     try {
       const url = await generateVisualConcept(activeCollection.strategy);
       const updated = { ...activeCollection, visualConceptUrl: url };
       setActiveCollection(updated);
       setCollections(prev => prev.map(c => c.id === updated.id ? updated : c));
-    } catch (err) { console.error(err); } finally { setIsImgGenerating(false); }
+    } catch (err: any) {
+      console.error(err);
+      setError("Failed to visualize installation.");
+    } finally { setIsImgGenerating(false); }
   };
 
   const handlePromotionalSuite = async () => {
     if (!activeCollection?.strategy) return;
     setIsPromoGenerating(true);
+    setError(null);
     try {
       const promo = await generatePromotionalSuite({ name: activeCollection.name, strategy: activeCollection.strategy });
       const updated = { ...activeCollection, promoAssets: promo };
       setActiveCollection(updated);
       setCollections(prev => prev.map(c => c.id === updated.id ? updated : c));
-    } catch (err) { console.error(err); } finally { setIsPromoGenerating(false); }
+    } catch (err: any) {
+      console.error(err);
+      setError("Failed to generate ad campaign.");
+    } finally { setIsPromoGenerating(false); }
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-neutral-950 text-neutral-100">
+      {error && (
+        <div className="bg-red-900/80 text-white text-xs py-2 px-6 text-center fixed top-20 left-0 right-0 z-[60] backdrop-blur-md animate-in fade-in slide-in-from-top-4 flex items-center justify-center gap-4">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="font-bold underline">Dismiss</button>
+        </div>
+      )}
+
       <header className="border-b border-neutral-900 bg-black/50 backdrop-blur-md sticky top-0 z-50 px-6 h-20 flex items-center justify-between">
         <div className="flex items-center gap-3 cursor-pointer" onClick={() => setView(AppView.DASHBOARD)}>
           <div className="w-10 h-10 bg-white flex items-center justify-center rounded-sm"><span className="text-black font-bold text-xl">V</span></div>
@@ -148,16 +175,50 @@ const App: React.FC = () => {
                   <input className="w-full bg-neutral-950 border-neutral-800 border p-3" placeholder="Collection Name" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
                   <input className="w-full bg-neutral-950 border-neutral-800 border p-3" placeholder="Season" value={formData.season} onChange={e => setFormData({...formData, season: e.target.value})} />
                   <textarea className="w-full bg-neutral-950 border-neutral-800 border p-3 min-h-[100px]" placeholder="Aesthetic description..." value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} />
+                  
+                  <div className="space-y-2">
+                    <p className="text-xs uppercase tracking-widest text-neutral-500">Moodboard Images</p>
+                    <input type="file" multiple accept="image/*" className="hidden" id="moodboard-upload" onChange={handleImageUpload} />
+                    <label htmlFor="moodboard-upload" className="block border-2 border-dashed border-neutral-800 p-4 text-center cursor-pointer hover:border-neutral-600 transition-colors">
+                      <span className="text-sm text-neutral-500">Click to upload collection photos</span>
+                    </label>
+                    {pendingImages.length > 0 && (
+                      <div className="flex gap-2 overflow-x-auto py-2 custom-scrollbar">
+                        {pendingImages.map(img => (
+                          <div key={img.id} className="relative group flex-shrink-0">
+                            <img src={img.url} className="h-16 w-16 object-cover border border-neutral-800" />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  
                   <Button onClick={createCollection} className="w-full">Initialize Exhibition</Button>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                {collections.slice(0, 4).map(c => (
-                  <div key={c.id} className="aspect-[3/4] bg-neutral-900 border border-neutral-800 overflow-hidden relative cursor-pointer" onClick={() => { setActiveCollection(c); setView(AppView.EDITOR); }}>
-                    {c.images[0] ? <img src={c.images[0].url} className="w-full h-full object-cover opacity-60" /> : <div className="w-full h-full flex items-center justify-center text-neutral-800">EMPTY</div>}
-                    <div className="absolute bottom-4 left-4"><p className="text-xs uppercase tracking-widest">{c.name}</p></div>
+              <div className="grid grid-cols-2 gap-4 h-fit">
+                {collections.map(c => (
+                  <div key={c.id} className="aspect-[3/4] bg-neutral-900 border border-neutral-800 overflow-hidden relative cursor-pointer group" onClick={() => { setActiveCollection(c); setView(AppView.EDITOR); }}>
+                    {c.images[0] ? (
+                      <img src={c.images[0].url} className="w-full h-full object-cover opacity-60 group-hover:scale-110 transition-transform duration-700" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-neutral-800 font-bold">EXHIBIT</div>
+                    )}
+                    <div className="absolute inset-0 bg-black/40 group-hover:bg-transparent transition-colors"></div>
+                    <div className="absolute bottom-4 left-4">
+                      <p className="text-xs uppercase tracking-[0.2em] font-bold">{c.name}</p>
+                    </div>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); deleteCollection(c.id); }}
+                      className="absolute top-4 right-4 text-white/20 hover:text-white transition-colors"
+                    >✕</button>
                   </div>
                 ))}
+                {collections.length === 0 && (
+                  <div className="col-span-2 py-20 border border-dashed border-neutral-900 text-center text-neutral-700 serif italic text-xl">
+                    No curated exhibitions yet.
+                  </div>
+                )}
               </div>
             </section>
           </div>
@@ -167,11 +228,19 @@ const App: React.FC = () => {
           <div className="space-y-12 animate-in slide-in-from-bottom-4 duration-500">
             <div className="flex flex-col lg:flex-row gap-12">
               <div className="lg:w-1/3 space-y-8">
-                <h2 className="text-5xl serif">{activeCollection.name}</h2>
-                <p className="text-neutral-400 italic">{activeCollection.description}</p>
+                <Button variant="ghost" onClick={() => setView(AppView.DASHBOARD)} className="-ml-4 opacity-50 hover:opacity-100">← Back to Dashboard</Button>
+                <h2 className="text-5xl serif leading-tight">{activeCollection.name}</h2>
+                <div className="space-y-4">
+                  <p className="text-neutral-400 italic leading-relaxed">{activeCollection.description}</p>
+                  <div className="flex gap-2 overflow-x-auto py-2 custom-scrollbar">
+                    {activeCollection.images.map(img => (
+                      <img key={img.id} src={img.url} className="h-20 w-16 object-cover border border-neutral-900 grayscale hover:grayscale-0 transition-all" />
+                    ))}
+                  </div>
+                </div>
                 <div className="pt-6 space-y-3">
-                  {!activeCollection.strategy && <Button onClick={handleCuration} className="w-full py-6" isLoading={isGenerating}>Design Strategy</Button>}
-                  {activeCollection.strategy && !activeCollection.visualConceptUrl && <Button onClick={handleVisualConcept} className="w-full py-6" isLoading={isImgGenerating}>Visualize Installation</Button>}
+                  {!activeCollection.strategy && <Button onClick={handleCuration} className="w-full py-6" isLoading={isGenerating}>Design Curation Strategy</Button>}
+                  {activeCollection.strategy && !activeCollection.visualConceptUrl && <Button onClick={handleVisualConcept} className="w-full py-6" isLoading={isImgGenerating}>Visualize Space</Button>}
                   {activeCollection.strategy && !activeCollection.promoAssets && <Button variant="secondary" onClick={handlePromotionalSuite} className="w-full py-6" isLoading={isPromoGenerating}>Generate Ad Campaign</Button>}
                 </div>
               </div>
@@ -180,33 +249,70 @@ const App: React.FC = () => {
                 {activeCollection.strategy ? (
                   <>
                     <div className="space-y-8">
-                      <div className="aspect-video bg-neutral-900 border border-neutral-800 overflow-hidden relative">
-                        {activeCollection.visualConceptUrl ? <img src={activeCollection.visualConceptUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center">Strategic view pending...</div>}
+                      <div className="aspect-video bg-neutral-900 border border-neutral-800 overflow-hidden relative group">
+                        {activeCollection.visualConceptUrl ? (
+                          <img src={activeCollection.visualConceptUrl} className="w-full h-full object-cover transition-transform duration-[20s] group-hover:scale-110" />
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center text-neutral-600 gap-4">
+                            {isImgGenerating ? <div className="animate-spin h-6 w-6 border-t-2 border-white rounded-full"></div> : null}
+                            <p className="italic">{isImgGenerating ? "Rendering installation sketch..." : "Spatial visualization pending..."}</p>
+                          </div>
+                        )}
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div><h4 className="text-xs uppercase text-white/40 mb-2">Theme</h4><p className="text-3xl serif">{activeCollection.strategy.themeName}</p></div>
-                        <div><h4 className="text-xs uppercase text-white/40 mb-2">Tagline</h4><p className="text-xl serif italic">"{activeCollection.strategy.tagline}"</p></div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 animate-in fade-in duration-1000">
+                        <section>
+                          <h4 className="text-xs uppercase tracking-widest text-white/40 mb-3">Theme Name</h4>
+                          <p className="text-4xl serif">{activeCollection.strategy.themeName}</p>
+                          <p className="text-xl serif italic text-neutral-400 mt-2">"{activeCollection.strategy.tagline}"</p>
+                        </section>
+                        <section className="bg-neutral-900/30 border border-neutral-900 p-6 rounded">
+                          <h4 className="text-xs uppercase tracking-widest text-white/40 mb-3">Concept & Atmosphere</h4>
+                          <p className="text-neutral-300 leading-relaxed font-light">{activeCollection.strategy.conceptDescription}</p>
+                        </section>
+                        <section>
+                          <h4 className="text-xs uppercase tracking-widest text-white/40 mb-2">Lighting Strategy</h4>
+                          <p className="text-neutral-400 text-sm">{activeCollection.strategy.lightingStrategy}</p>
+                        </section>
+                        <section>
+                          <h4 className="text-xs uppercase tracking-widest text-white/40 mb-2">Music & Soundscape</h4>
+                          <p className="text-neutral-400 text-sm">{activeCollection.strategy.musicAtmosphere}</p>
+                        </section>
                       </div>
                     </div>
 
                     {activeCollection.promoAssets && (
-                      <div className="pt-16 border-t border-neutral-900 grid grid-cols-1 lg:grid-cols-2 gap-12">
+                      <div className="pt-16 border-t border-neutral-900 grid grid-cols-1 lg:grid-cols-2 gap-12 animate-in slide-in-from-right-8 duration-700">
                         <div className="aspect-[3/4] bg-neutral-900 border border-neutral-800 overflow-hidden relative shadow-2xl">
                           <img src={activeCollection.promoAssets.posterUrl} className="w-full h-full object-cover" />
-                          <div className="absolute inset-x-0 bottom-0 p-8 bg-gradient-to-t from-black to-transparent">
+                          <div className="absolute inset-x-0 bottom-0 p-8 bg-gradient-to-t from-black via-black/40 to-transparent">
                             <p className="text-white text-xs tracking-[0.5em] font-bold uppercase">{activeCollection.name}</p>
+                            <p className="text-[8px] tracking-[0.6em] text-white/40 uppercase mt-2">Exclusive Exhibition Series</p>
                           </div>
                         </div>
-                        <div className="space-y-6">
-                          <h3 className="text-xs uppercase tracking-widest text-white/40">Campaign Content</h3>
-                          <section><h4 className="text-xs text-neutral-500 mb-1">Instagram Caption</h4><p className="p-4 bg-black border border-neutral-800 rounded text-sm text-neutral-400 font-mono">{activeCollection.promoAssets.instagramCaption}</p></section>
-                          <section><h4 className="text-xs text-neutral-500 mb-1">Press Snippet</h4><p className="text-neutral-300 leading-relaxed italic">{activeCollection.promoAssets.pressSnippet}</p></section>
+                        <div className="space-y-8">
+                          <h3 className="text-xs uppercase tracking-[0.5em] text-white font-bold border-b border-neutral-900 pb-4">Promotional Campaign</h3>
+                          <section>
+                            <h4 className="text-[10px] uppercase text-neutral-500 mb-2 tracking-widest">Instagram Copy</h4>
+                            <p className="p-4 bg-black border border-neutral-900 rounded text-xs text-neutral-400 font-mono whitespace-pre-wrap">{activeCollection.promoAssets.instagramCaption}</p>
+                          </section>
+                          <section>
+                            <h4 className="text-[10px] uppercase text-neutral-500 mb-2 tracking-widest">Press Snippet</h4>
+                            <p className="text-neutral-300 leading-relaxed italic text-sm">"{activeCollection.promoAssets.pressSnippet}"</p>
+                          </section>
+                          <Button variant="outline" className="w-full" onClick={handlePromotionalSuite} isLoading={isPromoGenerating}>Regenerate Ad</Button>
                         </div>
                       </div>
                     )}
                   </>
                 ) : (
-                  <div className="h-96 border border-dashed border-neutral-800 rounded flex items-center justify-center text-neutral-600">Strategy not yet initialized.</div>
+                  <div className="h-96 border border-dashed border-neutral-900 rounded-lg flex items-center justify-center text-neutral-700 italic serif text-xl p-12 text-center">
+                    {isGenerating ? (
+                      <div className="flex flex-col items-center gap-4">
+                         <div className="animate-spin h-8 w-8 border-t-2 border-white rounded-full"></div>
+                         <p>Curator is analyzing the collection...</p>
+                      </div>
+                    ) : "Tap 'Design Curation Strategy' to begin the spatial planning."}
+                  </div>
                 )}
               </div>
             </div>
