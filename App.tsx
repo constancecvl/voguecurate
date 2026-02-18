@@ -7,6 +7,19 @@ import { generateExhibitionStrategy, generateVisualConcept, generatePromotionalS
 const MAX_IMAGE_DIMENSION = 1024;
 const JPEG_QUALITY = 0.8;
 
+// Fixed: Corrected the Window interface declaration to match the expected AIStudio type.
+// The error indicated that 'aistudio' was already defined as 'AIStudio' in the global scope.
+declare global {
+  interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    openSelectKey: () => Promise<void>;
+  }
+
+  interface Window {
+    readonly aistudio: AIStudio;
+  }
+}
+
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>(AppView.DASHBOARD);
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -15,9 +28,21 @@ const App: React.FC = () => {
   const [isImgGenerating, setIsImgGenerating] = useState(false);
   const [isPromoGenerating, setIsPromoGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasApiKey, setHasApiKey] = useState<boolean>(true);
 
   const [formData, setFormData] = useState({ name: '', season: '', description: '' });
   const [pendingImages, setPendingImages] = useState<CollectionImage[]>([]);
+
+  // Check for API Key on mount
+  useEffect(() => {
+    const checkKey = async () => {
+      if (window.aistudio) {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        setHasApiKey(hasKey);
+      }
+    };
+    checkKey();
+  }, []);
 
   useEffect(() => {
     const saved = localStorage.getItem('voguecurate_collections');
@@ -35,6 +60,13 @@ const App: React.FC = () => {
       }
     }
   }, [collections]);
+
+  const handleOpenKeyPicker = async () => {
+    if (window.aistudio) {
+      await window.aistudio.openSelectKey();
+      setHasApiKey(true); // Assume success per guidelines
+    }
+  };
 
   const processImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -98,53 +130,77 @@ const App: React.FC = () => {
     }
   };
 
-  const handleCuration = async () => {
+  const wrapApiCall = async (fn: () => Promise<void>) => {
+    try {
+      await fn();
+    } catch (err: any) {
+      console.error(err);
+      if (err.message?.includes("Requested entity was not found") || err.message?.includes("API key")) {
+        setHasApiKey(false);
+        setError("API Key issue detected. Please re-connect your key.");
+      } else {
+        setError(err.message || "An unexpected error occurred.");
+      }
+    }
+  };
+
+  const handleCuration = () => wrapApiCall(async () => {
     if (!activeCollection) return;
     setIsGenerating(true);
     setError(null);
-    try {
-      const strategy = await generateExhibitionStrategy(activeCollection.name, activeCollection.description, activeCollection.images.map(img => img.base64 || img.url));
-      const updated = { ...activeCollection, strategy };
-      setActiveCollection(updated);
-      setCollections(prev => prev.map(c => c.id === updated.id ? updated : c));
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Failed to generate design strategy.");
-    } finally { setIsGenerating(false); }
-  };
+    const strategy = await generateExhibitionStrategy(activeCollection.name, activeCollection.description, activeCollection.images.map(img => img.base64 || img.url));
+    const updated = { ...activeCollection, strategy };
+    setActiveCollection(updated);
+    setCollections(prev => prev.map(c => c.id === updated.id ? updated : c));
+    setIsGenerating(false);
+  });
 
-  const handleVisualConcept = async () => {
+  const handleVisualConcept = () => wrapApiCall(async () => {
     if (!activeCollection?.strategy) return;
     setIsImgGenerating(true);
     setError(null);
-    try {
-      const url = await generateVisualConcept(activeCollection.strategy);
-      const updated = { ...activeCollection, visualConceptUrl: url };
-      setActiveCollection(updated);
-      setCollections(prev => prev.map(c => c.id === updated.id ? updated : c));
-    } catch (err: any) {
-      console.error(err);
-      setError("Failed to visualize installation.");
-    } finally { setIsImgGenerating(false); }
-  };
+    const url = await generateVisualConcept(activeCollection.strategy);
+    const updated = { ...activeCollection, visualConceptUrl: url };
+    setActiveCollection(updated);
+    setCollections(prev => prev.map(c => c.id === updated.id ? updated : c));
+    setIsImgGenerating(false);
+  });
 
-  const handlePromotionalSuite = async () => {
+  const handlePromotionalSuite = () => wrapApiCall(async () => {
     if (!activeCollection?.strategy) return;
     setIsPromoGenerating(true);
     setError(null);
-    try {
-      const promo = await generatePromotionalSuite({ name: activeCollection.name, strategy: activeCollection.strategy });
-      const updated = { ...activeCollection, promoAssets: promo };
-      setActiveCollection(updated);
-      setCollections(prev => prev.map(c => c.id === updated.id ? updated : c));
-    } catch (err: any) {
-      console.error(err);
-      setError("Failed to generate ad campaign.");
-    } finally { setIsPromoGenerating(false); }
-  };
+    const promo = await generatePromotionalSuite({ name: activeCollection.name, strategy: activeCollection.strategy });
+    const updated = { ...activeCollection, promoAssets: promo };
+    setActiveCollection(updated);
+    setCollections(prev => prev.map(c => c.id === updated.id ? updated : c));
+    setIsPromoGenerating(false);
+  });
 
   return (
     <div className="min-h-screen flex flex-col bg-neutral-950 text-neutral-100">
+      {!hasApiKey && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-xl animate-in fade-in duration-500 px-6">
+          <div className="max-w-md w-full bg-neutral-900 border border-neutral-800 p-10 text-center space-y-8 rounded-lg shadow-2xl">
+            <div className="w-16 h-16 bg-white flex items-center justify-center rounded-sm mx-auto shadow-xl">
+              <span className="text-black font-bold text-2xl">V</span>
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-3xl serif">Connection Required</h2>
+              <p className="text-neutral-400 text-sm leading-relaxed">
+                To generate curated strategies and ad visuals, you must connect a valid Gemini API key from a paid GCP project.
+              </p>
+            </div>
+            <div className="space-y-4">
+              <Button onClick={handleOpenKeyPicker} className="w-full py-4 text-lg">Connect Gemini API</Button>
+              <p className="text-[10px] text-neutral-500 uppercase tracking-widest">
+                Need help? Visit the <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="underline hover:text-white transition-colors">Billing Documentation</a>.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="bg-red-900/80 text-white text-xs py-2 px-6 text-center fixed top-20 left-0 right-0 z-[60] backdrop-blur-md animate-in fade-in slide-in-from-top-4 flex items-center justify-center gap-4">
           <span>{error}</span>
@@ -160,6 +216,7 @@ const App: React.FC = () => {
         <nav className="flex gap-4">
           <Button variant="ghost" onClick={() => setView(AppView.DASHBOARD)}>Dashboard</Button>
           {activeCollection && <Button variant="outline" onClick={() => setView(AppView.EDITOR)}>Editor</Button>}
+          <Button variant="ghost" onClick={handleOpenKeyPicker} className="text-[10px] uppercase tracking-widest opacity-50 hover:opacity-100">API Key</Button>
         </nav>
       </header>
 
@@ -214,11 +271,6 @@ const App: React.FC = () => {
                     >✕</button>
                   </div>
                 ))}
-                {collections.length === 0 && (
-                  <div className="col-span-2 py-20 border border-dashed border-neutral-900 text-center text-neutral-700 serif italic text-xl">
-                    No curated exhibitions yet.
-                  </div>
-                )}
               </div>
             </section>
           </div>
@@ -269,14 +321,6 @@ const App: React.FC = () => {
                           <h4 className="text-xs uppercase tracking-widest text-white/40 mb-3">Concept & Atmosphere</h4>
                           <p className="text-neutral-300 leading-relaxed font-light">{activeCollection.strategy.conceptDescription}</p>
                         </section>
-                        <section>
-                          <h4 className="text-xs uppercase tracking-widest text-white/40 mb-2">Lighting Strategy</h4>
-                          <p className="text-neutral-400 text-sm">{activeCollection.strategy.lightingStrategy}</p>
-                        </section>
-                        <section>
-                          <h4 className="text-xs uppercase tracking-widest text-white/40 mb-2">Music & Soundscape</h4>
-                          <p className="text-neutral-400 text-sm">{activeCollection.strategy.musicAtmosphere}</p>
-                        </section>
                       </div>
                     </div>
 
@@ -284,10 +328,6 @@ const App: React.FC = () => {
                       <div className="pt-16 border-t border-neutral-900 grid grid-cols-1 lg:grid-cols-2 gap-12 animate-in slide-in-from-right-8 duration-700">
                         <div className="aspect-[3/4] bg-neutral-900 border border-neutral-800 overflow-hidden relative shadow-2xl">
                           <img src={activeCollection.promoAssets.posterUrl} className="w-full h-full object-cover" />
-                          <div className="absolute inset-x-0 bottom-0 p-8 bg-gradient-to-t from-black via-black/40 to-transparent">
-                            <p className="text-white text-xs tracking-[0.5em] font-bold uppercase">{activeCollection.name}</p>
-                            <p className="text-[8px] tracking-[0.6em] text-white/40 uppercase mt-2">Exclusive Exhibition Series</p>
-                          </div>
                         </div>
                         <div className="space-y-8">
                           <h3 className="text-xs uppercase tracking-[0.5em] text-white font-bold border-b border-neutral-900 pb-4">Promotional Campaign</h3>
@@ -299,19 +339,13 @@ const App: React.FC = () => {
                             <h4 className="text-[10px] uppercase text-neutral-500 mb-2 tracking-widest">Press Snippet</h4>
                             <p className="text-neutral-300 leading-relaxed italic text-sm">"{activeCollection.promoAssets.pressSnippet}"</p>
                           </section>
-                          <Button variant="outline" className="w-full" onClick={handlePromotionalSuite} isLoading={isPromoGenerating}>Regenerate Ad</Button>
                         </div>
                       </div>
                     )}
                   </>
                 ) : (
                   <div className="h-96 border border-dashed border-neutral-900 rounded-lg flex items-center justify-center text-neutral-700 italic serif text-xl p-12 text-center">
-                    {isGenerating ? (
-                      <div className="flex flex-col items-center gap-4">
-                         <div className="animate-spin h-8 w-8 border-t-2 border-white rounded-full"></div>
-                         <p>Curator is analyzing the collection...</p>
-                      </div>
-                    ) : "Tap 'Design Curation Strategy' to begin the spatial planning."}
+                    {isGenerating ? "Analyzing Collection..." : "Design Strategy Pending."}
                   </div>
                 )}
               </div>

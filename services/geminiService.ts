@@ -7,7 +7,6 @@ import { ExhibitionStrategy, PromotionalAssets } from "../types";
  */
 const parseGeminiJson = (text: string) => {
   try {
-    // Remove markdown code blocks if present
     const cleaned = text.replace(/```json\n?|```/g, "").trim();
     return JSON.parse(cleaned);
   } catch (e) {
@@ -21,6 +20,7 @@ export const generateExhibitionStrategy = async (
   description: string,
   images: string[]
 ): Promise<ExhibitionStrategy> => {
+  // Always create a new instance right before the call as per guidelines
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const imageParts = images.map(img => ({
