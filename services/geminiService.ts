@@ -2,16 +2,12 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ExhibitionStrategy, PromotionalAssets } from "../types";
 
-/**
- * Helper to clean and parse JSON from Gemini's response.
- */
 const parseGeminiJson = (text: string) => {
   try {
     const cleaned = text.replace(/```json\n?|```/g, "").trim();
     return JSON.parse(cleaned);
   } catch (e) {
-    console.error("Failed to parse Gemini JSON:", text);
-    throw new Error("The curator returned an invalid response format. Please try again.");
+    throw new Error("The digital curator returned an unexpected format. Please refresh and try again.");
   }
 };
 
@@ -20,7 +16,6 @@ export const generateExhibitionStrategy = async (
   description: string,
   images: string[]
 ): Promise<ExhibitionStrategy> => {
-  // Always create a new instance right before the call as per guidelines
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const imageParts = images.map(img => ({
@@ -31,7 +26,7 @@ export const generateExhibitionStrategy = async (
   }));
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
+    model: 'gemini-3-flash-preview',
     contents: {
       parts: [
         ...imageParts,
@@ -62,7 +57,7 @@ export const generateExhibitionStrategy = async (
   });
 
   const text = response.text;
-  if (!text) throw new Error("Gemini returned an empty response");
+  if (!text) throw new Error("The digital curator is currently unavailable.");
   return parseGeminiJson(text);
 };
 
@@ -161,5 +156,5 @@ export const generateVisualConcept = async (
     }
   }
   
-  throw new Error("Failed to generate image");
+  throw new Error("Failed to generate visual render.");
 };
