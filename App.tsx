@@ -7,19 +7,6 @@ import { generateExhibitionStrategy, generateVisualConcept, generatePromotionalS
 const MAX_IMAGE_DIMENSION = 1024;
 const JPEG_QUALITY = 0.8;
 
-// Window interface for AI Studio tools
-declare global {
-  interface AIStudio {
-    hasSelectedApiKey: () => Promise<boolean>;
-    openSelectKey: () => Promise<void>;
-  }
-
-  interface Window {
-    // Fixed: Removed readonly modifier to avoid declaration merging conflicts with other global definitions
-    aistudio: AIStudio;
-  }
-}
-
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>(AppView.DASHBOARD);
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -51,14 +38,6 @@ const App: React.FC = () => {
     }
   }, [collections]);
 
-  const handleOpenKeyPicker = async () => {
-    if (window.aistudio) {
-      await window.aistudio.openSelectKey();
-      return true;
-    }
-    return false;
-  };
-
   const processImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -84,18 +63,27 @@ const App: React.FC = () => {
     });
   };
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, isForActiveCollection: boolean = false) => {
     const files = e.target.files;
     if (!files) return;
     const processedImages: CollectionImage[] = [];
     const fileArray = Array.from(files) as File[];
+    
     for (const file of fileArray) {
       try {
         const base64 = await processImage(file);
         processedImages.push({ id: Math.random().toString(36).substr(2, 9), url: base64, base64 });
       } catch (err) { console.error(err); }
     }
-    setPendingImages(prev => [...prev, ...processedImages]);
+
+    if (isForActiveCollection && activeCollection) {
+      const updatedImages = [...activeCollection.images, ...processedImages];
+      const updatedCollection = { ...activeCollection, images: updatedImages };
+      setActiveCollection(updatedCollection);
+      setCollections(prev => prev.map(c => c.id === updatedCollection.id ? updatedCollection : c));
+    } else {
+      setPendingImages(prev => [...prev, ...processedImages]);
+    }
   };
 
   const createCollection = () => {
@@ -121,31 +109,21 @@ const App: React.FC = () => {
     }
   };
 
-  /**
-   * Enhanced wrapper that checks for API key before calling AI functions
-   */
+  const removeImageFromCollection = (imageId: string) => {
+    if (!activeCollection) return;
+    const updatedImages = activeCollection.images.filter(img => img.id !== imageId);
+    const updatedCollection = { ...activeCollection, images: updatedImages };
+    setActiveCollection(updatedCollection);
+    setCollections(prev => prev.map(c => c.id === updatedCollection.id ? updatedCollection : c));
+  };
+
   const wrapApiCall = async (fn: () => Promise<void>) => {
     setError(null);
     try {
-      // 1. Check if we have a key
-      if (window.aistudio) {
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        if (!hasKey) {
-          const success = await handleOpenKeyPicker();
-          if (!success) return; // User cancelled or failed
-        }
-      }
-      
-      // 2. Execute the actual AI function
       await fn();
     } catch (err: any) {
       console.error(err);
-      if (err.message?.includes("Requested entity was not found") || err.message?.includes("API key")) {
-        setError("API Key issue detected. Please re-connect your key by clicking the API button in the header.");
-        await handleOpenKeyPicker();
-      } else {
-        setError(err.message || "An unexpected error occurred during AI generation.");
-      }
+      setError(err.message || "An unexpected error occurred during AI generation.");
     }
   };
 
@@ -200,13 +178,6 @@ const App: React.FC = () => {
         <nav className="flex items-center gap-4">
           <Button variant="ghost" onClick={() => setView(AppView.DASHBOARD)}>Dashboard</Button>
           {activeCollection && <Button variant="outline" onClick={() => setView(AppView.EDITOR)}>Editor</Button>}
-          <button 
-            onClick={handleOpenKeyPicker} 
-            className="text-[10px] uppercase tracking-widest bg-neutral-900 px-3 py-1 rounded border border-neutral-800 text-neutral-500 hover:text-white hover:border-neutral-600 transition-all flex items-center gap-2"
-          >
-            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            API Key
-          </button>
         </nav>
       </header>
 
@@ -216,7 +187,7 @@ const App: React.FC = () => {
             <section className="grid grid-cols-1 lg:grid-cols-2 gap-12">
               <div className="space-y-6">
                 <h2 className="text-6xl serif leading-tight">Curation <span className="italic">Elevated</span>.</h2>
-                <p className="text-neutral-400 text-lg max-w-md">Transform your fashion collection into an immersive gallery experience. Manage your moodboard here and use AI to plan your installation.</p>
+                <p className="text-neutral-400 text-lg max-w-md">Transform your fashion collection into an immersive gallery experience. Manage your moodboard and design your installation seamlessly.</p>
                 
                 <div className="p-8 bg-neutral-900/50 border border-neutral-800 rounded-lg space-y-4 max-w-lg">
                   <h3 className="text-xl serif">New Collection</h3>
@@ -226,7 +197,7 @@ const App: React.FC = () => {
                   
                   <div className="space-y-2">
                     <p className="text-xs uppercase tracking-widest text-neutral-500">Collection Images</p>
-                    <input type="file" multiple accept="image/*" className="hidden" id="moodboard-upload" onChange={handleImageUpload} />
+                    <input type="file" multiple accept="image/*" className="hidden" id="moodboard-upload" onChange={(e) => handleImageUpload(e, false)} />
                     <label htmlFor="moodboard-upload" className="block border-2 border-dashed border-neutral-800 p-4 text-center cursor-pointer hover:border-neutral-600 hover:bg-neutral-900 transition-all">
                       <span className="text-sm text-neutral-500">Click to upload photos</span>
                     </label>
@@ -251,7 +222,7 @@ const App: React.FC = () => {
                     {c.images[0] ? (
                       <img src={c.images[0].url} className="w-full h-full object-cover opacity-60 group-hover:scale-110 transition-transform duration-700" />
                     ) : (
-                      <div className="w-full h-full flex items-center justify-center text-neutral-800 font-bold uppercase tracking-widest text-xs">Untitled</div>
+                      <div className="w-full h-full flex items-center justify-center text-neutral-800 font-bold uppercase tracking-widest text-xs">Empty</div>
                     )}
                     <div className="absolute inset-0 bg-black/40 group-hover:bg-transparent transition-colors"></div>
                     <div className="absolute bottom-4 left-4 pr-10">
@@ -265,8 +236,8 @@ const App: React.FC = () => {
                   </div>
                 ))}
                 {collections.length === 0 && (
-                  <div className="col-span-2 py-32 border border-dashed border-neutral-900 text-center flex flex-col items-center justify-center gap-4">
-                    <p className="serif italic text-xl text-neutral-700">Your fashion archive is empty.</p>
+                  <div className="col-span-2 py-32 border border-dashed border-neutral-900 text-center flex flex-col items-center justify-center gap-4 opacity-50">
+                    <p className="serif italic text-xl">Your archive starts here.</p>
                   </div>
                 )}
               </div>
@@ -285,19 +256,35 @@ const App: React.FC = () => {
                 </div>
                 
                 <div className="space-y-6">
-                  <p className="text-neutral-400 italic leading-relaxed">{activeCollection.description}</p>
-                  <div className="space-y-3">
-                    <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-600 font-bold">Moodboard</p>
+                  <p className="text-neutral-400 italic leading-relaxed text-sm">{activeCollection.description}</p>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-600 font-bold">Moodboard</p>
+                      <div>
+                        <input type="file" multiple accept="image/*" className="hidden" id="editor-image-upload" onChange={(e) => handleImageUpload(e, true)} />
+                        <label htmlFor="editor-image-upload" className="text-[10px] uppercase tracking-widest text-neutral-400 hover:text-white cursor-pointer transition-colors flex items-center gap-1 border border-neutral-800 px-2 py-1 rounded">
+                          <span>+ Add Images</span>
+                        </label>
+                      </div>
+                    </div>
                     <div className="grid grid-cols-4 gap-2">
                       {activeCollection.images.map(img => (
-                        <img key={img.id} src={img.url} className="aspect-square object-cover border border-neutral-900 grayscale hover:grayscale-0 transition-all cursor-zoom-in" />
+                        <div key={img.id} className="relative group aspect-square">
+                          <img src={img.url} className="w-full h-full object-cover border border-neutral-900 grayscale hover:grayscale-0 transition-all cursor-zoom-in" />
+                          <button 
+                            onClick={() => removeImageFromCollection(img.id)}
+                            className="absolute -top-1 -right-1 bg-black text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10 scale-75 border border-neutral-800"
+                          >
+                            ✕
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </div>
                 </div>
 
                 <div className="pt-8 space-y-3 border-t border-neutral-900">
-                  <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-4 text-center">AI Curation Features (Requires API Key)</p>
+                  <p className="text-[10px] uppercase tracking-widest text-neutral-500 mb-4 text-center">AI Collaboration</p>
                   {!activeCollection.strategy && <Button onClick={handleCuration} className="w-full py-6" isLoading={isGenerating}>Design Curation Strategy</Button>}
                   {activeCollection.strategy && !activeCollection.visualConceptUrl && <Button onClick={handleVisualConcept} className="w-full py-6" isLoading={isImgGenerating}>Visualize Installation</Button>}
                   {activeCollection.strategy && !activeCollection.promoAssets && <Button variant="secondary" onClick={handlePromotionalSuite} className="w-full py-6" isLoading={isPromoGenerating}>Generate Ad Campaign</Button>}
@@ -362,7 +349,7 @@ const App: React.FC = () => {
                     <p className="italic serif text-2xl max-w-sm">
                       {isGenerating ? "The curator is deep in thought, weaving your aesthetic into a spatial narrative..." : "Ready to plan your exhibition?"}
                     </p>
-                    {!isGenerating && <p className="text-xs uppercase tracking-[0.3em] text-neutral-600 max-w-xs leading-loose">Upload images on the left, then click 'Design Strategy' to start the AI collaboration.</p>}
+                    {!isGenerating && <p className="text-xs uppercase tracking-[0.3em] text-neutral-600 max-w-xs leading-loose">Upload your moodboard on the left, then click 'Design Strategy' to start the process.</p>}
                   </div>
                 )}
               </div>
